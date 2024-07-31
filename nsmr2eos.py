@@ -8,13 +8,36 @@ from multiprocessing import Pool
 import scipy
 import h5py 
 import scipy.optimize as op
+import configparser
 
+
+
+config=configparser.ConfigParser(inline_comment_prefixes = ("#"))
+
+config.read_dict( {
+                'Data' : {'PathToData' : r"DATA/"
+                },
+                'Sampler Settings' : { 'NWalks' : 32,
+                                      'Nsteps' : 30000,
+                                      'acor'   : 50,
+                                      'continue' : 0,
+                                      'output' : 'posterior'
+                    },
+                'Fit Settings' : { 'fit' : False }
+    })
+
+
+try:
+    config.read("config.ini")
+except:
+    print("Configuration file error, using default values")
+    
 
 os.environ["OMP_NUM_THREADS"] = "1"
 np.random.seed(42)
 
 #Importing the sources data from PathToData
-PathToData=r"DATA/"
+PathToData=config['Data']['PathToData']
 
 #data in form of samples from posteriors
 
@@ -211,8 +234,8 @@ def neglnlike(p):
 
 #chain setup
 
-Nwalk=32
-Nsteps=30000
+Nwalk=config.getint('Sampler Settings','Nwalks')
+Nsteps=config.getint('Sampler Settings','Nsteps')
 NPar=3+Nsources
 
 
@@ -221,18 +244,18 @@ initpar=np.array([3.6,7.8,1.06,1.44,1.28,2.06,1.6,1.3,1.4,1.7,1.3,1.4])
 initpars=np.array([initpar+0.001*(np.random.rand(NPar)-0.5) for i in range(Nwalk)])
 
 
-chain_name=r"posterior_run0740_salmi2024_0030_vinci2024_STPST.h5"
+chain_name=config['Sampler Settings']['output']+r".h5"
 backend=emcee.backends.HDFBackend(chain_name)
 
 
 #to continue sampling set cont=1
-cont=0
+cont=config.getboolean('Sampler Settings','continue')
 if not(cont):
     backend.reset(Nwalk,NPar)
 
 #set fit=1 to perform MAP estimation instead of MCMC
 #put cont=1 to start minimization from estimated posterior means
-fit=0
+fit=config.getboolean('Fit Settings','Fit')
 def print_params(xk):
     
     print(xk,end="\r")
@@ -281,7 +304,7 @@ if fit:
 
 
 
-acor_calc=100   #steps before the next autocorrelation time estimate
+acor_calc=config.getfloat('Sample Settings','acor')   #steps before the next autocorrelation time estimate
 
 autocorr=np.empty((Nsteps//acor_calc)+1)
 
