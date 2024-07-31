@@ -206,8 +206,6 @@ def lnlike(p):
 
 def neglnlike(p):
     r=-lnlike(p)[0]
-#    print(p)
-#    print(r)
     return r
     
 
@@ -228,7 +226,7 @@ backend=emcee.backends.HDFBackend(chain_name)
 
 
 #to continue sampling set cont=1
-cont=1
+cont=0
 if not(cont):
     backend.reset(Nwalk,NPar)
 
