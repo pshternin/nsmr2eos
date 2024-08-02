@@ -3,7 +3,6 @@ import os, sys
 import emcee
 import scipy.stats as stats
 import time
-import emcee
 from multiprocessing import Pool
 import scipy
 import h5py 
@@ -12,6 +11,7 @@ import configparser
 
 
 
+# setting the default configuration parameters
 config=configparser.ConfigParser(inline_comment_prefixes = ("#"))
 
 config.read_dict( {
@@ -27,6 +27,7 @@ config.read_dict( {
     })
 
 
+#input the configuration file
 try:
     config.read("config.ini")
 except:
@@ -35,6 +36,8 @@ except:
 
 os.environ["OMP_NUM_THREADS"] = "1"
 np.random.seed(42)
+
+
 
 #Importing the sources data from PathToData
 PathToData=config['Data']['PathToData']
@@ -64,18 +67,22 @@ GW170817=np.genfromtxt(PathToData+GW170817name,comments="#")
 
 
 #make KDEs
+
 riley0740kde=stats.gaussian_kde(np.transpose(riley0740))
 
 Casakde=stats.gaussian_kde(np.transpose(casa))
+
 miller0030kde=stats.gaussian_kde(np.transpose(miller0030[:,[1,0]]))
 
 nicer0437kde=stats.gaussian_kde(np.transpose(nicer0437))
 
-#making KDE of 4D distribution for GW170817
+
+#make KDE of 4D distribution for GW170817
+
 GW170817kde=stats.gaussian_kde(np.transpose(GW170817[:,[0,4,1,5]]))
 
 
-
+#number of GW sources. Saved for a future use
 NGW=1
 
 
@@ -113,14 +120,22 @@ m1724 = dset1724['yval'][()]
 
 int1724=scipy.interpolate.RegularGridInterpolator((m1724,r1724),avgs1724,bounds_error=False, fill_value=-1)
 
+
+
+
+
 #list of functions providing likelihoods for all sources except GW170817
+#To add a new source follow an examples above and include a new likelihood function at the end of the following list
 likes=[riley0740kde.pdf,Casakde.pdf,miller0030kde.pdf,nicer0437kde.pdf,int1702, int1724, int1810]
 
 
 #spiders
+#Black widow and redback data. Mass-only measure
 
 spiders=np.array([[2.22,0.1],[2.11,0.04],[2.15,0.16],[2.28,0.1],[2.35,0.17]])
 
+#spiders
+#Radio binaries data. Mass-only measure
 
 #radiopulsars
 radio=np.array([[2.01,0.04],[1.97,0.04]])
@@ -147,7 +162,7 @@ vecc=[0.985,-0.990,3.02,0.529]
 
 Nlikes=len(likes)
 
-Nsources=Nlikes+2*NGW # 2 for GW170817 
+Nsources=Nlikes+2*NGW # 2*NGW for GW170817 
 
 
 #physical constants
@@ -159,7 +174,7 @@ RJ=c/np.sqrt(G*rho0)/1.e5
 MJ=rho0*(RJ*1.e5)**3/Msun
 
 
-
+#prior on the model parameters
 def lnprior(p):
     
     pmax,rhomax, rho = p[0:3]
@@ -184,13 +199,17 @@ def lnprior(p):
     
     spidersprior=np.array([scipy.stats.norm.logcdf(Mmax,loc=y[0],scale=y[1]) for y in spiders])
         
-    kilonovaprior=scipy.stats.norm.logsf(Mmax, loc=2.16,scale=0.08)                             #kilonovaprior
+    kilonovaprior=scipy.stats.norm.logsf(Mmax, loc=2.16,scale=0.08)  #kilonovaprior
     
+    
+    #causality and speed of sound constraints are included
     if 1.5<Mmax<3. and 1.<rho<2. and 5.<Rmax<30. and Mmax<0.24*Rmax and csmax<1.05:
         return radioprior.sum()+spidersprior.sum()+kilonovaprior
     
     return -np.inf
 
+
+#likelihood calculation
 def lnlike(p):
     
     infblobs=[-np.inf for i in range(Nsources)] #blobs contains source radii
@@ -201,32 +220,39 @@ def lnlike(p):
     
     pmax,rhomax, rho = p[0:3]
 
-    MGW=p[3:5]
 
-    Mss=p[5:]
+
+    MGW=p[3:5]  #GW sources are listet first
+
+    Mss=p[5:]   #all other sources
     
 
-    
+    # Calculating radii for all sources via universal realtions    
+
     Mmax=MJ*pmax**1.5/rhomax**2/fddo(pmax, rhomax, vecM)
     Rmax0=pmax**0.5/rhomax/fddo(pmax, rhomax, vecR)
     Rmax=Rmax0*RJ
     
     Rs=Rmax*MRddo(Mss/Mmax,rho)
+    
+    
+    # Calculating likelihoods
     ls=np.array([kde([m,r]) for kde,m,r in zip(likes,Mss,Rs)])
     
     if np.any(ls<=0):
         return - np.inf,*infblobs
     
-    ll=np.log10(ls).sum()
+    
+    ll=np.log10(ls).sum()   #total log-likelihood for non-GW sources
     
 #GW data require separate treatment, since here 4D posterior is used        
     RGW=Rmax*MRddo(MGW/Mmax,rho)
     likeGW=np.log(GW170817kde.pdf([MGW[0],RGW[0],MGW[1],RGW[1]]))
     
-    return lnp+ll+likeGW,*RGW,*Rs
+    return lnp+ll+likeGW,*RGW,*Rs     #returns likelihood and individual sources' radii in from of emee blobs
 
 
-
+#negative of log-likelihood. Needed for minimization.
 def neglnlike(p):
     r=-lnlike(p)[0]
     return r
@@ -241,9 +267,12 @@ NPar=3+Nsources
 
 #initial parameter guess
 initpar=np.array([3.6,7.8,1.06,1.44,1.28,2.06,1.6,1.3,1.4,1.7,1.3,1.4])
+
+#initialize walkers randomly around inintpar
 initpars=np.array([initpar+0.001*(np.random.rand(NPar)-0.5) for i in range(Nwalk)])
 
 
+#setting up the chain
 chain_name=config['Sampler Settings']['output']+r".h5"
 backend=emcee.backends.HDFBackend(chain_name)
 
@@ -263,6 +292,7 @@ def print_params(xk):
     
 
 
+#fitting mode. Recommended to run after MCMC or other sampler to have the starting point in the vicinity of MAP
 
 if fit:
     if backend.iteration<500:
@@ -272,7 +302,6 @@ if fit:
         flatchain=backend.get_chain(flat=True,discard=disc)
         meanpars=np.mean(flatchain,axis=0)
     
-  #  meanpars=initpars
     
     lw=np.get_printoptions()['linewidth']
     np.set_printoptions(linewidth=np.inf)
